@@ -1,115 +1,89 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Net;
+using System.Net.Http;
 using System.Web.Http;
 using refactor_me.Models;
+using refactor_me.DataAccess;
+using refactor_me.ErrorHandling;
 
 namespace refactor_me.Controllers
 {
     [RoutePrefix("products")]
-    public class ProductsController : ApiController
+    public class ProductsController : BaseApiController
     {
         [Route]
         [HttpGet]
-        public Products GetAll()
-        {
-            return new Products();
+        public HttpResponseMessage GetAll()
+        {            
+            return Request.CreateResponse(HttpStatusCode.OK, new Products());
         }
 
         [Route]
         [HttpGet]
-        public Products SearchByName(string name)
+        public HttpResponseMessage SearchByName(string name)
         {
-            return new Products(name);
+            return Request.CreateResponse(HttpStatusCode.OK, new Products(name));
         }
 
         [Route("{id}")]
         [HttpGet]
-        public Product GetProduct(Guid id)
+        public HttpResponseMessage GetProduct(Guid id)
         {
             var product = new Product(id);
             if (product.IsNew)
-                throw new HttpResponseException(HttpStatusCode.NotFound);
+            {
+                return Request.CreateResponse(HttpStatusCode.NotFound, 
+                    ErrorProvider.ReturnError(ErrorCode.ProductNotFound).WrapInPayload());
+            }                
 
-            return product;
+            return Request.CreateResponse(HttpStatusCode.OK, product);
         }
 
         [Route]
         [HttpPost]
-        public void Create(Product product)
+        public HttpResponseMessage CreateProduct(Product product)
         {
-            product.Save();
+            var orig = new Product(product.Id);          
+            orig.CopyFrom(product);
+            orig.Save();
+            return orig.IsNew
+                        ? Request.CreateResponse(HttpStatusCode.Created, product)
+                        : Request.CreateResponse(HttpStatusCode.OK, product);
         }
 
         [Route("{id}")]
         [HttpPut]
-        public void Update(Guid id, Product product)
+        public HttpResponseMessage UpdateProduct(Guid id, Product product)
         {
-            var orig = new Product(id)
-            {
-                Name = product.Name,
-                Description = product.Description,
-                Price = product.Price,
-                DeliveryPrice = product.DeliveryPrice
-            };
+            var orig = new Product(id);
 
-            if (!orig.IsNew)
-                orig.Save();
+            // Put verb is idempotent. 
+            // Hence, if resource is not yet created, client should trigger a post request first
+            if (orig.IsNew)
+            {                
+                Request.CreateResponse(HttpStatusCode.NotFound,
+                            ErrorProvider.ReturnError(ErrorCode.ProductNotFound).WrapInPayload());
+            }                
+
+            orig.CopyFrom(product);
+            orig.Save();
+            return Request.CreateResponse(HttpStatusCode.OK, orig);
         }
 
         [Route("{id}")]
         [HttpDelete]
-        public void Delete(Guid id)
+        public HttpResponseMessage Delete(Guid id)
         {
-            var product = new Product(id);
-            product.Delete();
-        }
-
-        [Route("{productId}/options")]
-        [HttpGet]
-        public ProductOptions GetOptions(Guid productId)
-        {
-            return new ProductOptions(productId);
-        }
-
-        [Route("{productId}/options/{id}")]
-        [HttpGet]
-        public ProductOption GetOption(Guid productId, Guid id)
-        {
-            var option = new ProductOption(id);
-            if (option.IsNew)
-                throw new HttpResponseException(HttpStatusCode.NotFound);
-
-            return option;
-        }
-
-        [Route("{productId}/options")]
-        [HttpPost]
-        public void CreateOption(Guid productId, ProductOption option)
-        {
-            option.ProductId = productId;
-            option.Save();
-        }
-
-        [Route("{productId}/options/{id}")]
-        [HttpPut]
-        public void UpdateOption(Guid id, ProductOption option)
-        {
-            var orig = new ProductOption(id)
+            var toDelete = new Product(id);
+            if (toDelete.IsNew)
             {
-                Name = option.Name,
-                Description = option.Description
-            };
+                return Request.CreateResponse(HttpStatusCode.NotFound,
+                            ErrorProvider.ReturnError(ErrorCode.ProductNotFound).WrapInPayload());
+            }
+            toDelete.Delete();
 
-            if (!orig.IsNew)
-                orig.Save();
-        }
-
-        [Route("{productId}/options/{id}")]
-        [HttpDelete]
-        public void DeleteOption(Guid id)
-        {
-            var opt = new ProductOption(id);
-            opt.Delete();
+            return Request.CreateResponse(HttpStatusCode.OK);
         }
     }
 }

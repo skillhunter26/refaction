@@ -1,42 +1,44 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.SqlClient;
+using System.Linq;
 using Newtonsoft.Json;
+using refactor_me.DataAccess;
 
 namespace refactor_me.Models
 {
     public class Products
     {
+        IProductDataMapper dal;
+
         public List<Product> Items { get; private set; }
+
+        IProductDataMapper Dal
+        {
+            get
+            {
+                if (dal != null)
+                    return dal;
+
+                dal = DataMapperFactory<IProductDataMapper>.GetInstance();
+                return dal;
+            }
+        }
 
         public Products()
         {
-            LoadProducts(null);
+            Items = Dal.FindAll().ToList();
         }
 
         public Products(string name)
         {
-            LoadProducts($"where lower(name) like '%{name.ToLower()}%'");
-        }
-
-        private void LoadProducts(string where)
-        {
-            Items = new List<Product>();
-            var conn = Helpers.NewConnection();
-            var cmd = new SqlCommand($"select id from product {where}", conn);
-            conn.Open();
-
-            var rdr = cmd.ExecuteReader();
-            while (rdr.Read())
-            {
-                var id = Guid.Parse(rdr["id"].ToString());
-                Items.Add(new Product(id));
-            }
+            Items = Dal.FindByName(name).ToList();
         }
     }
 
     public class Product
     {
+        IProductDataMapper dal;
+
         public Guid Id { get; set; }
 
         public string Name { get; set; }
@@ -50,86 +52,101 @@ namespace refactor_me.Models
         [JsonIgnore]
         public bool IsNew { get; }
 
+        IProductDataMapper Dal
+        {
+            get
+            {
+                if (dal != null)
+                    return dal;
+
+                dal = DataMapperFactory<IProductDataMapper>.GetInstance();
+                return dal;
+            }
+        }
+
         public Product()
         {
             Id = Guid.NewGuid();
             IsNew = true;
         }
 
+        public Product(Guid id, bool isNew)
+        {
+            Id = id;
+            IsNew = isNew;
+        }
+
         public Product(Guid id)
         {
             IsNew = true;
-            var conn = Helpers.NewConnection();
-            var cmd = new SqlCommand($"select * from product where id = '{id}'", conn);
-            conn.Open();
-
-            var rdr = cmd.ExecuteReader();
-            if (!rdr.Read())
+            Id = id;
+            
+            var product = Dal.FindById(id);
+            if (product == null)
                 return;
 
             IsNew = false;
-            Id = Guid.Parse(rdr["Id"].ToString());
-            Name = rdr["Name"].ToString();
-            Description = (DBNull.Value == rdr["Description"]) ? null : rdr["Description"].ToString();
-            Price = decimal.Parse(rdr["Price"].ToString());
-            DeliveryPrice = decimal.Parse(rdr["DeliveryPrice"].ToString());
+            Name = product.Name;
+            Description = product.Description;
+            Price = product.Price;
+            DeliveryPrice = product.DeliveryPrice;
+        }
+
+        public void CopyFrom(Product source)
+        {
+            Name = source.Name;
+            Price = source.Price;
+            Description = source.Description;
+            DeliveryPrice = source.DeliveryPrice;
         }
 
         public void Save()
         {
-            var conn = Helpers.NewConnection();
-            var cmd = IsNew ? 
-                new SqlCommand($"insert into product (id, name, description, price, deliveryprice) values ('{Id}', '{Name}', '{Description}', {Price}, {DeliveryPrice})", conn) : 
-                new SqlCommand($"update product set name = '{Name}', description = '{Description}', price = {Price}, deliveryprice = {DeliveryPrice} where id = '{Id}'", conn);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
+            Dal.Upsert(this);
         }
 
         public void Delete()
         {
-            foreach (var option in new ProductOptions(Id).Items)
-                option.Delete();
-
-            var conn = Helpers.NewConnection();
-            conn.Open();
-            var cmd = new SqlCommand($"delete from product where id = '{Id}'", conn);
-            cmd.ExecuteNonQuery();
+            Dal.Delete(this);
         }
     }
 
     public class ProductOptions
     {
+        IProductOptionDataMapper dal;
+
+        IProductOptionDataMapper Dal
+        {
+            get
+            {
+                if (dal != null)
+                    return dal;
+
+                dal = DataMapperFactory<IProductOptionDataMapper>.GetInstance();
+                return dal;
+            }
+        }
+
         public List<ProductOption> Items { get; private set; }
+
+        public Guid ProductId { get; private set; }
 
         public ProductOptions()
         {
-            LoadProductOptions(null);
+            Items = Dal.FindAll().ToList();
         }
 
         public ProductOptions(Guid productId)
         {
-            LoadProductOptions($"where productid = '{productId}'");
-        }
-
-        private void LoadProductOptions(string where)
-        {
-            Items = new List<ProductOption>();
-            var conn = Helpers.NewConnection();
-            var cmd = new SqlCommand($"select id from productoption {where}", conn);
-            conn.Open();
-
-            var rdr = cmd.ExecuteReader();
-            while (rdr.Read())
-            {
-                var id = Guid.Parse(rdr["id"].ToString());
-                Items.Add(new ProductOption(id));
-            }
+            ProductId = productId;
+            Items = Dal.FindByProductId(productId).ToList();
         }
     }
 
     public class ProductOption
     {
+        IProductOptionDataMapper dal;
+
         public Guid Id { get; set; }
 
         public Guid ProductId { get; set; }
@@ -141,47 +158,59 @@ namespace refactor_me.Models
         [JsonIgnore]
         public bool IsNew { get; }
 
+        IProductOptionDataMapper Dal
+        {
+            get
+            {
+                if (dal != null)
+                    return dal;
+
+                dal = DataMapperFactory<IProductOptionDataMapper>.GetInstance();
+                return dal;
+            }
+        }
+
         public ProductOption()
         {
             Id = Guid.NewGuid();
             IsNew = true;
         }
 
+        public ProductOption(Guid id, bool isNew)
+        {
+            IsNew = false;
+            Id = id;
+        }
+
         public ProductOption(Guid id)
         {
             IsNew = true;
-            var conn = Helpers.NewConnection();
-            var cmd = new SqlCommand($"select * from productoption where id = '{id}'", conn);
-            conn.Open();
+            Id = id;
 
-            var rdr = cmd.ExecuteReader();
-            if (!rdr.Read())
+            var productOption = Dal.FindById(id);
+            if (productOption == null)
                 return;
 
             IsNew = false;
-            Id = Guid.Parse(rdr["Id"].ToString());
-            ProductId = Guid.Parse(rdr["ProductId"].ToString());
-            Name = rdr["Name"].ToString();
-            Description = (DBNull.Value == rdr["Description"]) ? null : rdr["Description"].ToString();
+            ProductId = productOption.ProductId;
+            Name = productOption.Name;
+            Description = productOption.Description;
         }
 
         public void Save()
         {
-            var conn = Helpers.NewConnection();
-            var cmd = IsNew ?
-                new SqlCommand($"insert into productoption (id, productid, name, description) values ('{Id}', '{ProductId}', '{Name}', '{Description}')", conn) :
-                new SqlCommand($"update productoption set name = '{Name}', description = '{Description}' where id = '{Id}'", conn);
-
-            conn.Open();
-            cmd.ExecuteNonQuery();
+            Dal.Upsert(this);
         }
 
         public void Delete()
         {
-            var conn = Helpers.NewConnection();
-            conn.Open();
-            var cmd = new SqlCommand($"delete from productoption where id = '{Id}'", conn);
-            cmd.ExecuteReader();
+            Dal.Delete(this);
+        }
+
+        public void CopyFrom(ProductOption source)
+        {
+            Name = source.Name;
+            Description = source.Description;
         }
     }
 }
